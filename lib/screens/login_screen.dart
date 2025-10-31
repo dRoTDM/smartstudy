@@ -28,11 +28,17 @@ class LoginScreen extends StatelessWidget {
             ),
             SizedBox(height: 25),
             ElevatedButton(
-              onPressed: () {
-                Navigator.pushReplacementNamed(context, '/home');
-              },
-              child: Text('Login'),
-            ),
+  onPressed: () {
+    final email = emailController.text.trim();
+    Navigator.pushReplacementNamed(
+      context,
+      '/home',
+      arguments: {'email': email},
+    );
+  },
+  child: Text('Login'),
+),
+
             SizedBox(height: 10),
             TextButton(
               onPressed: () {

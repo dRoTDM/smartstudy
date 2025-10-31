@@ -33,19 +33,18 @@ class SignupScreen extends StatelessWidget {
               obscureText: true,
             ),
             SizedBox(height: 25),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pushReplacementNamed(context, '/home');
-              },
-              child: Text('Next'),
-            ),
-            SizedBox(height: 10),
-            TextButton(
-              onPressed: () {
-                Navigator.pushReplacementNamed(context, '/login');
-              },
-              child: Text('Already have an account? Login'),
-            ),
+          ElevatedButton(
+  onPressed: () {
+    final email = emailController.text.trim();
+    Navigator.pushReplacementNamed(
+      context,
+      '/home',
+      arguments: {'email': email},
+    );
+  },
+  child: Text('Next'),
+),
+
           ],
         ),
       ),
