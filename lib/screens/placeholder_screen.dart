@@ -1,226 +1,245 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/timezone.dart' as tz;
+import '../widgets/bottom_nav.dart';
 
 class PlaceholderScreen extends StatefulWidget {
+  const PlaceholderScreen({Key? key}) : super(key: key);
+
   @override
   _PlaceholderScreenState createState() => _PlaceholderScreenState();
 }
 
 class _PlaceholderScreenState extends State<PlaceholderScreen> {
-  final TextEditingController _taskController = TextEditingController();
-  final List<Map<String, dynamic>> _tasks = [];
-  final FlutterLocalNotificationsPlugin _notifications =
-      FlutterLocalNotificationsPlugin();
+  List<Map<String, dynamic>> tasks = [];
 
   @override
   void initState() {
     super.initState();
-    _initNotifications();
     _loadTasks();
   }
 
-  // Initialize local notifications
-  Future<void> _initNotifications() async {
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidInit);
-    await _notifications.initialize(initSettings);
-  }
-
-  // Schedule notification at the given time
-  Future<void> _showNotification(String taskTitle, DateTime dateTime) async {
-    final tz.TZDateTime tzDateTime = tz.TZDateTime.from(dateTime, tz.local);
-
-    const androidDetails = AndroidNotificationDetails(
-      'task_channel',
-      'Task Reminders',
-      importance: Importance.max,
-      priority: Priority.high,
-    );
-
-    final details = NotificationDetails(android: androidDetails);
-
-    await _notifications.zonedSchedule(
-      tzDateTime.millisecondsSinceEpoch ~/ 1000, // unique id
-      'Task Reminder',
-      taskTitle,
-      tzDateTime,
-      details,
-      androidAllowWhileIdle: true,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      matchDateTimeComponents: DateTimeComponents.time,
-    );
-  }
-
-  // Load tasks from SharedPreferences
   Future<void> _loadTasks() async {
     final prefs = await SharedPreferences.getInstance();
-    final String? stored = prefs.getString('tasks');
+    final stored = prefs.getString('tasks');
+
     if (stored != null) {
       final decoded = jsonDecode(stored) as List;
+
       setState(() {
-        _tasks.clear();
-        _tasks.addAll(decoded.map((e) => Map<String, dynamic>.from(e)));
+        tasks = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+        tasks.sort((a, b) {
+          try {
+            return DateTime.parse(a['date']).compareTo(DateTime.parse(b['date']));
+          } catch (_) {
+            return 0;
+          }
+        });
       });
     }
   }
 
-  // Save tasks to SharedPreferences
   Future<void> _saveTasks() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('tasks', jsonEncode(_tasks));
+    await prefs.setString('tasks', jsonEncode(tasks));
   }
 
-  // Add new task
-  void _addTask(DateTime? dateTime) {
-    if (_taskController.text.trim().isEmpty || dateTime == null) return;
+  Future<void> _addTaskDialog() async {
+    final TextEditingController titleCtrl = TextEditingController();
+    DateTime? pickedDate;
+    TimeOfDay? pickedTime;
 
-    final newTask = {
-      'title': _taskController.text.trim(),
-      'done': false,
-      'date': dateTime.toString(),
-    };
-
-    setState(() {
-      _tasks.add(newTask);
-      _taskController.clear();
-    });
-
-    _saveTasks();
-_showNotification(newTask['title'] as String, dateTime);
-  }
-
-  // Toggle done
-  void _toggleDone(int index) {
-    setState(() {
-      _tasks[index]['done'] = !_tasks[index]['done'];
-    });
-    _saveTasks();
-  }
-
-  // Delete task
-  void _deleteTask(int index) {
-    setState(() {
-      _tasks.removeAt(index);
-    });
-    _saveTasks();
-  }
-
-  // Pick date and time for task
-  Future<void> _pickDateTime() async {
-    DateTime? date = await showDatePicker(
+    await showDialog(
       context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2100),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Task'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(hintText: 'Task title')),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.calendar_today),
+              label: const Text('Pick Date & Time'),
+              onPressed: () async {
+                final date = await showDatePicker(
+                  context: ctx,
+                  initialDate: DateTime.now(),
+                  firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                  lastDate: DateTime.now().add(const Duration(days: 365 * 3)),
+                );
+                if (date == null) return;
+
+                final time = await showTimePicker(
+                  context: ctx,
+                  initialTime: TimeOfDay.now(),
+                );
+                if (time == null) return;
+
+                pickedDate = date;
+                pickedTime = time;
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (titleCtrl.text.trim().isEmpty ||
+                  pickedDate == null ||
+                  pickedTime == null) {
+                Navigator.pop(ctx);
+                return;
+              }
+
+              final dt = DateTime(
+                pickedDate!.year,
+                pickedDate!.month,
+                pickedDate!.day,
+                pickedTime!.hour,
+                pickedTime!.minute,
+              );
+
+              final newTask = {
+                'title': titleCtrl.text.trim(),
+                'date': dt.toIso8601String(),
+                'subtitle': '',
+              };
+
+              setState(() {
+                tasks.add(newTask);
+                tasks.sort((a, b) {
+                  return DateTime.parse(a['date'])
+                      .compareTo(DateTime.parse(b['date']));
+                });
+              });
+
+              _saveTasks();
+              Navigator.pop(ctx);
+            },
+            child: const Text('Add'),
+          ),
+        ],
+      ),
     );
-    if (date == null) return;
+  }
 
-    TimeOfDay? time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-    );
-    if (time == null) return;
-
-    final selectedDateTime =
-        DateTime(date.year, date.month, date.day, time.hour, time.minute);
-
-    _addTask(selectedDateTime);
+  String _formatDate(DateTime d) {
+    const months = [
+      'January','February','March','April','May','June',
+      'July','August','September','October','November','December'
+    ];
+    return "${d.day} ${months[d.month - 1]}";
   }
 
   @override
   Widget build(BuildContext context) {
+    final today = DateTime.now();
+
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: const Color(0xFFF5F6F8),
       appBar: AppBar(
-        title: Text('My Tasks'),
-        backgroundColor: Colors.indigo,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: Row(
           children: [
-            // Input field + add button
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _taskController,
-                    decoration: InputDecoration(
-                      hintText: 'Enter a task...',
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(width: 10),
-                ElevatedButton.icon(
-                  onPressed: _pickDateTime,
-                  icon: Icon(Icons.add),
-                  label: Text('Add'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 20),
-
-            // Task list
             Expanded(
-              child: _tasks.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No tasks yet — add one!',
-                        style: TextStyle(color: Colors.grey, fontSize: 16),
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: _tasks.length,
-                      itemBuilder: (context, index) {
-                        final task = _tasks[index];
-                        final date = DateTime.parse(task['date']);
-
-                        return Card(
-                          color: Colors.white,
-                          child: ListTile(
-                            leading: Checkbox(
-                              value: task['done'],
-                              activeColor: Colors.indigo,
-                              onChanged: (_) => _toggleDone(index),
-                            ),
-                            title: Text(
-                              task['title'],
-                              style: TextStyle(
-                                decoration: task['done']
-                                    ? TextDecoration.lineThrough
-                                    : null,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            subtitle: Text(
-                              "${date.day}/${date.month}/${date.year} at ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}",
-                              style: TextStyle(color: Colors.grey[700]),
-                            ),
-                            trailing: IconButton(
-                              icon: Icon(Icons.delete, color: Colors.red),
-                              onPressed: () => _deleteTask(index),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_formatDate(today),
+                      style: TextStyle(
+                          color: Colors.grey[700], fontSize: 14)),
+                  const SizedBox(height: 4),
+                  const Text("Today",
+                      style:
+                          TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                ],
+              ),
             ),
+            ElevatedButton.icon(
+              onPressed: _addTaskDialog,
+              icon: const Icon(Icons.add),
+              label: const Text('Add Task'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            )
           ],
         ),
       ),
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        child: tasks.isEmpty
+            ? Center(
+                child: Text("No tasks yet. Add one!",
+                    style: TextStyle(color: Colors.grey[700])))
+            : ListView.separated(
+                itemCount: tasks.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 18),
+                itemBuilder: (context, i) {
+                  final t = tasks[i];
+                  final title = t['title']?.toString() ?? "Task";
+                  final subtitle = t['subtitle']?.toString() ?? "";
+
+                  DateTime dt;
+                  try {
+                    dt = DateTime.parse(t['date']);
+                  } catch (_) {
+                    dt = DateTime.now();
+                  }
+
+                  final String time =
+                      "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+
+                  final pastel = [
+                    const Color(0xFFB7C6FF),
+                    const Color(0xFFCFF7E0),
+                    const Color(0xFFFFD9E0),
+                  ];
+
+                  final bgColor = pastel[i % pastel.length];
+
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                          width: 60,
+                          child: Text(time,
+                              textAlign: TextAlign.right,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold))),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: bgColor,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(title,
+                                    style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 6),
+                                Text(subtitle,
+                                    style: const TextStyle(
+                                        color: Colors.black54)),
+                              ]),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+      ),
+      bottomNavigationBar: buildBottomNav(context, 1, null),
     );
   }
 }
